@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,7 @@ func (h *ProductHandler) Create(c *gin.Context) {
 	// 2. Memanggil Usecase (Koki) untuk memproses data
 	product, err := h.usecase.CreateProduct(&req)
 	if err != nil {
+		log.Printf("[DEBUG DB ERROR]: %v\n", err)
 		// Mengembalikan 500 Internal Server Error jika terjadi kegagalan di layer bisnis/database
 		// Catatan: Di sistem aslinya, kita harus memisahkan error bisnis (4xx) dan error server (5xx).
 		// Kita akan buat sistem Custom Error yang rapi nanti.

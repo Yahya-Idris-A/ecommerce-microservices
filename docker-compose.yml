@@ -55,6 +55,32 @@ services:
       CONFIG_STORAGE_TOPIC: my_connect_configs
       OFFSET_STORAGE_TOPIC: my_connect_offsets
       STATUS_STORAGE_TOPIC: my_connect_statuses
+  
+  # 5. Elasticsearch (Search Engine & Query Side Database)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: ecommerce_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false # Menonaktifkan password default sementara untuk kemudahan development lokal
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m # Membatasi penggunaan RAM maksimal 512MB agar laptop tidak berat
+    ports:
+      - "9200:9200"
+  
+  # 6. PostgreSQL (Database for User Service)
+  postgres_user:
+    image: postgres:15-alpine
+    container_name: ecommerce_postgres_user
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: ${USER_DB_USER}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD}
+      POSTGRES_DB: ${USER_DB_NAME}
+    command: ["postgres", "-c", "wal_level=logical"]
+    volumes:
+      - postgres_user_data:/var/lib/postgresql/data
 
 volumes:
   postgres_data:
+  postgres_user_data:
