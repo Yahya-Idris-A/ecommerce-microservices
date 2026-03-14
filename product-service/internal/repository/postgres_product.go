@@ -3,6 +3,8 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	// Ingat sesuaikan path import ini
@@ -86,4 +88,133 @@ func (r *postgresProductRepo) GetByID(id uuid.UUID) (*domain.Product, error) {
 	}
 
 	return product, nil
+}
+
+// GetAll mengambil semua produk dari database
+func (r *postgresProductRepo) GetAll(keyword string, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+	// 1. Siapkan kerangka dasar query (WHERE 1=1 adalah trik agar kita bisa menyambung AND dengan mudah)
+	baseQuery := `
+        SELECT id, merchant_id, category_id, name, slug, description, price, stock, created_at, updated_at
+        FROM products
+        WHERE 1=1
+    `
+
+	// Siapkan wadah untuk parameter ($1, $2, dst)
+	var args []interface{}
+	argCount := 1
+
+	// 2. Jika ada Keyword, tambahkan filter pencarian
+	if keyword != "" {
+		// Karena argCount 1, ini akan menjadi: AND (name ILIKE $1 OR description ILIKE $1)
+		baseQuery += fmt.Sprintf(` AND (name ILIKE $%d OR description ILIKE $%d)`, argCount, argCount)
+		args = append(args, "%"+keyword+"%")
+		argCount++ // Naikkan hitungan
+	}
+
+	// 3. Jika ada Cursor (halaman selanjutnya), tambahkan filter tuple (created_at, id)
+	if cursorCreatedAt != "" && cursorID != "" {
+		// Jika argCount sekarang 2, ini akan menjadi: AND (created_at, id) < ($2, $3)
+		baseQuery += fmt.Sprintf(` AND (created_at, id) < ($%d, $%d)`, argCount, argCount+1)
+		args = append(args, cursorCreatedAt, cursorID)
+		argCount += 2
+	}
+
+	// 4. Selalu akhiri dengan ORDER BY dan LIMIT
+	baseQuery += fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d`, argCount)
+	args = append(args, limit)
+
+	// 5. Eksekusi query dengan parameter yang sudah dirakit
+	rows, err := r.db.Query(baseQuery, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var products []domain.Product
+	var lastCreatedAt time.Time
+	var lastID uuid.UUID
+
+	// 6. Looping data seperti biasa
+	for rows.Next() {
+		var p domain.Product
+		err := rows.Scan(&p.ID, &p.MerchantID, &p.CategoryID, &p.Name, &p.Slug, &p.Description, &p.Price, &p.Stock, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, "", err
+		}
+		products = append(products, p)
+
+		// Simpan data terakhir untuk dijadikan cursor berikutnya
+		lastCreatedAt = p.CreatedAt
+		lastID = p.ID
+	}
+
+	// 7. Buat string Cursor baru jika data tidak kosong
+	var nextCursor string
+	if len(products) > 0 {
+		// Format cursor: "waktu|id"
+		nextCursor = fmt.Sprintf("%s|%s", lastCreatedAt.Format(time.RFC3339Nano), lastID.String())
+	}
+
+	return products, nextCursor, nil
+}
+
+// GetByMerchantID mengambil semua produk milik satu toko tertentu
+func (r *postgresProductRepo) GetByMerchantID(merchantID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+	var rows *sql.Rows
+	var err error
+
+	// 1. Cek apakah ini halaman selanjutnya (cursor terisi)
+	if cursorCreatedAt != "" && cursorID != "" {
+		query := `
+            SELECT id, merchant_id, category_id, name, slug, description, price, stock, created_at, updated_at
+            FROM products
+            WHERE merchant_id = $1 AND (created_at, id) < ($2, $3)
+            ORDER BY created_at DESC, id DESC
+            LIMIT $4
+        `
+		rows, err = r.db.Query(query, merchantID, cursorCreatedAt, cursorID, limit)
+	} else {
+		// 2. Jika tidak ada cursor, ini adalah halaman pertama
+		query := `
+            SELECT id, merchant_id, category_id, name, slug, description, price, stock, created_at, updated_at
+            FROM products
+            WHERE merchant_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT $2
+        `
+		rows, err = r.db.Query(query, merchantID, limit)
+	}
+
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var products []domain.Product
+	var lastCreatedAt time.Time
+	var lastID uuid.UUID
+
+	for rows.Next() {
+		var p domain.Product
+		err := rows.Scan(
+			&p.ID, &p.MerchantID, &p.CategoryID, &p.Name, &p.Slug,
+			&p.Description, &p.Price, &p.Stock, &p.CreatedAt, &p.UpdatedAt,
+		)
+		if err != nil {
+			return nil, "", err
+		}
+		products = append(products, p)
+
+		// 3. Selalu simpan data terakhir di setiap iterasi
+		lastCreatedAt = p.CreatedAt
+		lastID = p.ID
+	}
+
+	// 4. Rakit cursor baru untuk dikirim ke frontend
+	var nextCursor string
+	if len(products) > 0 {
+		nextCursor = fmt.Sprintf("%s|%s", lastCreatedAt.Format(time.RFC3339Nano), lastID.String())
+	}
+
+	return products, nextCursor, nil
 }

@@ -14,12 +14,27 @@ type Product struct {
 	MerchantID  string `json:"merchant_id"`
 }
 
-// 2. Define the contract for the Repository (Database layer)
-type ProductSearchRepository interface {
-	SearchProducts(ctx context.Context, query string) ([]Product, error)
+type Merchant struct {
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
 }
 
-// 3. Define the contract for the Usecase (Business logic layer)
+type GlobalSearchResult struct {
+	Products  []Product  `json:"products"`
+	Merchants []Merchant `json:"merchants"`
+}
+
+// 2. Define the contract for the Repository
+type ProductSearchRepository interface {
+	// Ubah return type menjadi GlobalSearchResult
+	SearchGlobal(ctx context.Context, query string, limit int, cursor string) (*GlobalSearchResult, string, error)
+}
+
+// 3. Define the contract for the Usecase
 type ProductSearchUsecase interface {
-	Search(ctx context.Context, query string) ([]Product, error)
+	// Ubah return type menjadi GlobalSearchResult
+	Search(ctx context.Context, query string, limit int, cursor string) (*GlobalSearchResult, string, error)
 }

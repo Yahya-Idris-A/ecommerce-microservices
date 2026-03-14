@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Yahya-idris-A/ecommerce-microservices/search-service/internal/domain"
 	"github.com/gin-gonic/gin"
@@ -24,19 +25,32 @@ func NewSearchHandler(r *gin.Engine, us domain.ProductSearchUsecase) {
 }
 
 func (h *SearchHandler) SearchProducts(c *gin.Context) {
-	query := c.Query("q")
+	keyword := c.Query("q")
+	cursor := c.Query("cursor")
+
+	// Validasi Limit Anti-Bug
+	limitStr := c.Query("limit")
+	limit := 10 // Default
+	if limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
 
 	// Call the Usecase layer
-	products, err := h.searchUsecase.Search(c.Request.Context(), query)
+	result, nextCursor, err := h.searchUsecase.Search(c.Request.Context(), keyword, limit, cursor)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Return clean response
+	// Sisipkan metadata persis seperti di Product Service
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Search successful",
-		"count":   len(products),
-		"data":    products,
+		"message": "Global search successful",
+		"data":    result,
+		"meta": gin.H{
+			"next_cursor": nextCursor,
+			"has_more":    nextCursor != "",
+		},
 	})
 }

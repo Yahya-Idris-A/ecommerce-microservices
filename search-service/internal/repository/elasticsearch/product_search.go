@@ -20,49 +20,87 @@ func NewProductSearchRepository(es *elasticsearch.Client) domain.ProductSearchRe
 	}
 }
 
-func (r *productSearchRepo) SearchProducts(ctx context.Context, query string) ([]domain.Product, error) {
-	// Build the Elasticsearch Match Query
+func (r *productSearchRepo) SearchGlobal(ctx context.Context, keyword string, limit int, cursor string) (*domain.GlobalSearchResult, string, error) {
+	// 1. Susun blok pencarian dasar dan urutannya (Tie-breaker ID wajib ada)
 	esQuery := fmt.Sprintf(`{
-		"query": {
-			"match": {
-				"name": "%s"
-			}
-		}
-	}`, query)
+        "size": %d,
+        "query": {
+            "multi_match": {
+                "query": "%s",
+                "fields": ["name", "description"]
+            }
+        },
+        "sort": [
+            { "_score": "desc" },
+            { "id": "asc" }
+        ]`, limit, keyword)
 
-	// Execute the search
+	if cursor != "" {
+		parts := strings.Split(cursor, "|")
+		if len(parts) == 2 {
+			// parts[0] adalah skor (angka), parts[1] adalah _id (string)
+			esQuery += fmt.Sprintf(`, "search_after": [%s, "%s"]`, parts[0], parts[1])
+		}
+	}
+	esQuery += `}`
+
 	res, err := r.esClient.Search(
 		r.esClient.Search.WithContext(ctx),
-		r.esClient.Search.WithIndex("products"),
+		r.esClient.Search.WithIndex("products", "merchants"),
 		r.esClient.Search.WithBody(strings.NewReader(esQuery)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("[ERROR] Failed to execute search: %w", err)
+		return nil, "", err
 	}
 	defer res.Body.Close()
 
 	if res.IsError() {
-		return nil, fmt.Errorf("[ERROR] Error response from search engine: %s", res.Status())
+		var e map[string]interface{}
+		if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
+			return nil, "", fmt.Errorf("[ES ERROR] Gagal membaca pesan error dari ES: %s", err)
+		}
+		// Ini akan melempar pesan error asli dari Elasticsearch ke Postman
+		return nil, "", fmt.Errorf("[ES ERROR] %v", e["error"])
 	}
 
-	// Decode the response
 	var raw map[string]interface{}
-	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("[ERROR] Failed to parse search results: %w", err)
+	json.NewDecoder(res.Body).Decode(&raw)
+
+	result := &domain.GlobalSearchResult{
+		Products:  []domain.Product{},
+		Merchants: []domain.Merchant{},
 	}
 
-	// Extract the products
-	var products []domain.Product
-	hits := raw["hits"].(map[string]interface{})["hits"].([]interface{})
+	hitsMap, ok := raw["hits"].(map[string]interface{})
+	if !ok {
+		return result, "", nil
+	}
+	hits := hitsMap["hits"].([]interface{})
 
 	for _, hit := range hits {
-		source := hit.(map[string]interface{})["_source"]
-		sourceBytes, _ := json.Marshal(source)
+		hitDict := hit.(map[string]interface{})
+		index := hitDict["_index"].(string)
+		sourceBytes, _ := json.Marshal(hitDict["_source"])
 
-		var prod domain.Product
-		json.Unmarshal(sourceBytes, &prod)
-		products = append(products, prod)
+		if index == "products" {
+			var prod domain.Product
+			json.Unmarshal(sourceBytes, &prod)
+			result.Products = append(result.Products, prod)
+		} else if index == "merchants" {
+			var merch domain.Merchant
+			json.Unmarshal(sourceBytes, &merch)
+			result.Merchants = append(result.Merchants, merch)
+		}
 	}
 
-	return products, nil
+	var nextCursor string
+	if len(hits) > 0 {
+		lastHit := hits[len(hits)-1].(map[string]interface{})
+		if sortValues, hasSort := lastHit["sort"].([]interface{}); hasSort && len(sortValues) == 2 {
+			// Gabungkan score dan _id menjadi format "score|_id"
+			nextCursor = fmt.Sprintf("%v|%v", sortValues[0], sortValues[1])
+		}
+	}
+
+	return result, nextCursor, nil
 }

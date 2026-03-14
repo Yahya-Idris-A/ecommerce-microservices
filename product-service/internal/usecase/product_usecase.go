@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,14 +15,16 @@ import (
 // Layer lain tidak bisa langsung memanggil struct ini,
 // mereka harus lewat interface domain.ProductUsecase.
 type productUsecase struct {
-	productRepo domain.ProductRepository
+	productRepo  domain.ProductRepository
+	merchantRepo domain.MerchantRepository
 }
 
 // NewProductUsecase adalah constructor (Penerapan Dependency Injection).
 // Kita "menyuntikkan" repository database ke dalam usecase.
-func NewProductUsecase(repo domain.ProductRepository) domain.ProductUsecase {
+func NewProductUsecase(repo domain.ProductRepository, merchantRepo domain.MerchantRepository) domain.ProductUsecase {
 	return &productUsecase{
-		productRepo: repo,
+		productRepo:  repo,
+		merchantRepo: merchantRepo,
 	}
 }
 
@@ -33,16 +36,17 @@ func (u *productUsecase) CreateProduct(req *domain.CreateProductRequest) (*domai
 	}
 
 	// 2. Logika Bisnis: Membuat Slug otomatis dari Nama Produk
-	// Contoh: "Kopi Susu Gayo" -> "kopi-susu-gayo"
-	slug := strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+	productID := uuid.New()
+	baseSlug := strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+	uniqueSlug := fmt.Sprintf("%s-%s", baseSlug, productID.String()[:8])
 
 	// 3. Memetakan (Mapping) DTO dari user menjadi Entitas Domain
 	product := &domain.Product{
-		ID:          uuid.New(), // Generate UUID baru secara otomatis
+		ID:          productID,
 		MerchantID:  req.MerchantID,
 		CategoryID:  req.CategoryID,
 		Name:        req.Name,
-		Slug:        slug,
+		Slug:        uniqueSlug,
 		Description: req.Description,
 		Price:       req.Price,
 		Stock:       req.Stock,
@@ -62,4 +66,27 @@ func (u *productUsecase) CreateProduct(req *domain.CreateProductRequest) (*domai
 // GetProductByID sekadar meneruskan permintaan pencarian ke repository
 func (u *productUsecase) GetProductByID(id uuid.UUID) (*domain.Product, error) {
 	return u.productRepo.GetByID(id)
+}
+
+// Tambahkan fungsi ini di bagian bawah file usecase kamu
+func (u *productUsecase) GetAllProducts(merchantID string, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+	if merchantID != "" {
+		parsedID, err := uuid.Parse(merchantID)
+		if err != nil {
+			return nil, "", err // URL tidak valid
+		}
+		return u.productRepo.GetByMerchantID(parsedID, limit, cursorCreatedAt, cursorID)
+	}
+	return u.productRepo.GetAll(keyword, limit, cursorCreatedAt, cursorID)
+}
+
+func (u *productUsecase) GetMyProducts(userID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+	// 1. Cari dulu profil tokonya berdasarkan userID
+	merchant, err := u.merchantRepo.GetByUserID(userID)
+	if err != nil {
+		return nil, "", err // Akan melempar error jika user belum buat toko
+	}
+
+	// 2. Jika toko ketemu, ambil semua produk berdasarkan ID toko tersebut
+	return u.productRepo.GetByMerchantID(merchant.ID, limit, cursorCreatedAt, cursorID)
 }

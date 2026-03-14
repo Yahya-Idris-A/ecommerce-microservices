@@ -8,9 +8,10 @@ import (
 
 // Category merepresentasikan kategori dari sebuah produk
 type Category struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         uuid.UUID  `json:"id"`
+	MerchantID *uuid.UUID `json:"merchant_id,omitempty"` // Tambahkan pointer ini (omitempty agar tidak tampil di JSON jika nil)
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 // Product adalah entitas utama sebagai "Source of Truth"
@@ -44,6 +45,8 @@ type CreateProductRequest struct {
 type ProductRepository interface {
 	Create(product *Product) error
 	GetByID(id uuid.UUID) (*Product, error)
+	GetAll(keyword string, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	GetByMerchantID(merchantID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
 	// Kita akan tambahkan fungsi lain (Update, Delete) perlahan nanti
 }
 
@@ -52,4 +55,24 @@ type ProductRepository interface {
 type ProductUsecase interface {
 	CreateProduct(req *CreateProductRequest) (*Product, error)
 	GetProductByID(id uuid.UUID) (*Product, error)
+	GetAllProducts(merchantID string, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	GetMyProducts(userID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+}
+
+// --- Tambahan untuk Category ---
+
+type CreateCategoryRequest struct {
+	Name string `json:"name" binding:"required"`
+}
+
+type CategoryRepository interface {
+	Create(category *Category) error
+	GetByID(id uuid.UUID) (*Category, error)
+	GetAll(merchantID string) ([]Category, error)
+}
+
+type CategoryUsecase interface {
+	CreateCategory(req *CreateCategoryRequest, merchantID *uuid.UUID) (*Category, error)
+	GetCategoryByID(id uuid.UUID) (*Category, error)
+	GetAllCategories(merchantID string) ([]Category, error)
 }

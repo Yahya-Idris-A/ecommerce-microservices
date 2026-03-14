@@ -22,8 +22,15 @@ func main() {
 	defer db.Close()
 
 	// 3. Setup Dependency Injection
+	// Inisialisasi Repository
 	productRepo := repository.NewPostgresProductRepository(db)
-	productUsecase := usecase.NewProductUsecase(productRepo)
+	categoryRepo := repository.NewPostgresCategoryRepository(db)
+	merchantRepo := repository.NewPostgresMerchantRepository(db)
+
+	// Inisialisasi Usecase
+	productUsecase := usecase.NewProductUsecase(productRepo, merchantRepo)
+	categoryUsecase := usecase.NewCategoryUsecase(categoryRepo)
+	merchantUsecase := usecase.NewMerchantUsecase(merchantRepo)
 
 	if os.Getenv("APP_ENV") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -38,6 +45,8 @@ func main() {
 
 	// 5. Mendaftarkan Handler
 	delivery.NewProductHandler(router, productUsecase)
+	delivery.NewCategoryHandler(router, categoryUsecase, merchantRepo)
+	delivery.NewMerchantHandler(router, merchantUsecase)
 
 	// 6. Jalankan Server HTTP sesuai port di .env
 	log.Printf("starting product-service on port %s", cfg.AppPort)

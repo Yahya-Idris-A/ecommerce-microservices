@@ -3,11 +3,14 @@ package http
 import (
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	// Ingat sesuaikan path import ini
+	"github.com/Yahya-idris-A/ecommerce-microservices/product-service/internal/delivery/http/middleware"
 	"github.com/Yahya-idris-A/ecommerce-microservices/product-service/internal/domain"
 )
 
@@ -27,7 +30,9 @@ func NewProductHandler(r *gin.Engine, us domain.ProductUsecase) {
 	api := r.Group("/api/v1/products")
 	{
 		// Mendaftarkan endpoint ke fungsi yang sesuai
-		api.POST("", handler.Create)
+		api.POST("", middleware.AuthGuard("admin", "merchant"), handler.Create)
+		api.GET("", handler.GetProducts)
+		api.GET("/me", middleware.AuthGuard("merchant"), handler.GetMyProducts)
 		api.GET("/:id", handler.GetByID)
 	}
 }
@@ -94,5 +99,116 @@ func (h *ProductHandler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data":    product,
+	})
+}
+
+// Tambahkan fungsi ini di bagian bawah file product_handler.go
+func (h *ProductHandler) GetProducts(c *gin.Context) {
+	merchantID := c.Query("merchant_id")
+	keyword := c.Query("q")
+	limitStr := c.Query("limit")
+	limit := 10 // Default limit jika user tidak menyertakan parameter ini
+
+	if limitStr != "" {
+		parsedLimit, err := strconv.Atoi(limitStr)
+		// Hanya gunakan nilai dari user jika dia angka valid dan lebih dari 0
+		if err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+	cursor := c.Query("cursor")
+
+	var cursorCreatedAt, cursorID string
+
+	if cursor != "" {
+		parts := strings.Split(cursor, "|")
+		if len(parts) == 2 {
+			cursorCreatedAt = parts[0]
+			cursorID = parts[1]
+		} else {
+			// Jika formatnya bukan "waktu|id", tolak requestnya
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cursor format"})
+			return
+		}
+	}
+
+	products, nextCursor, err := h.usecase.GetAllProducts(merchantID, keyword, limit, cursorCreatedAt, cursorID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
+		return
+	}
+
+	// Jika produk kosong, kembalikan array kosong agar frontend Next.js kamu tidak error saat map()
+	if products == nil {
+		products = []domain.Product{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Product retrieved successfully",
+		"data":    products,
+		"meta": gin.H{
+			"next_cursor": nextCursor,
+			"has_more":    nextCursor != "",
+		},
+	})
+}
+
+func (h *ProductHandler) GetMyProducts(c *gin.Context) {
+	// Ambil user_id dari JWT token yang sudah dicegat oleh AuthGuard
+	userIDStr, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid User ID format"})
+		return
+	}
+
+	limitStr := c.Query("limit")
+	limit := 10 // Default limit jika user tidak menyertakan parameter ini
+
+	if limitStr != "" {
+		parsedLimit, err := strconv.Atoi(limitStr)
+		// Hanya gunakan nilai dari user jika dia angka valid dan lebih dari 0
+		if err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	cursor := c.Query("cursor")
+	var cursorCreatedAt, cursorID string
+
+	if cursor != "" {
+		parts := strings.Split(cursor, "|")
+		if len(parts) == 2 {
+			cursorCreatedAt = parts[0]
+			cursorID = parts[1]
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cursor format"})
+			return
+		}
+	}
+
+	// Tarik data lewat Usecase
+	products, nextCursor, err := h.usecase.GetMyProducts(userID, limit, cursorCreatedAt, cursorID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	if products == nil {
+		products = []domain.Product{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "My catalog retrieved successfully",
+		"data":    products,
+		"meta": gin.H{
+			"next_cursor": nextCursor,
+			"has_more":    nextCursor != "",
+		},
 	})
 }

@@ -6,30 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 	"github.com/segmentio/kafka-go"
 )
 
-type Product struct {
-	ID          string `json:"id"`
-	CategoryID  string `json:"category_id"`
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
-	Description string `json:"description"`
-	Price       string `json:"price"`
-	Stock       int32  `json:"stock"`
-	MerchantID  string `json:"merchant_id"`
-}
-
-type DebeziumPayload struct {
-	Op    string   `json:"op"`
-	After *Product `json:"after"`
-}
-
 type DebeziumMessage struct {
-	Payload DebeziumPayload `json:"payload"`
+	Payload struct {
+		After map[string]interface{} `json:"after"`
+	} `json:"payload"`
 }
 
 func main() {
@@ -41,16 +28,16 @@ func main() {
 
 	// 2. Initialize Kafka Reader
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{"localhost:9092"},
-		Topic:    "ecommerce.public.products",
-		GroupID:  "search-service-group",
-		MinBytes: 10e3,
-		MaxBytes: 10e6,
+		Brokers:     []string{"localhost:9092"},
+		GroupTopics: []string{"ecommerce.public.products", "ecommerce.public.merchants"},
+		GroupID:     "search-service-group",
+		MinBytes:    10e3,
+		MaxBytes:    10e6,
 	})
 
 	fmt.Println("[INFO] Search Service Worker is running...")
 	fmt.Println("[INFO] Connected to Elasticsearch at http://localhost:9200")
-	fmt.Println("[INFO] Listening to Kafka topic: ecommerce.public.products")
+	fmt.Println("[INFO] Listening to topics: products & merchants")
 	fmt.Println("---------------------------------------------------")
 
 	for {
@@ -65,26 +52,38 @@ func main() {
 			continue
 		}
 
-		// Skip if there is no data (e.g., delete operation)
 		if msg.Payload.After == nil {
 			continue
 		}
 
-		product := msg.Payload.After
+		data := msg.Payload.After
 
-		// 3. Convert clean product struct back to JSON for Elasticsearch
-		docBytes, err := json.Marshal(product)
+		// Ambil ID dari map untuk DocumentID di ES
+		docID, ok := data["id"].(string)
+		if !ok {
+			continue // Skip kalau tidak ada field ID
+		}
+
+		docBytes, err := json.Marshal(data)
 		if err != nil {
-			log.Printf("[ERROR] Failed to marshal product: %v\n", err)
 			continue
 		}
 
-		// 4. Send data to Elasticsearch Index named "products"
+		// Tentukan target Index berdasarkan nama topik Kafka
+		var targetIndex string
+		if strings.Contains(m.Topic, "products") {
+			targetIndex = "products"
+		} else if strings.Contains(m.Topic, "merchants") {
+			targetIndex = "merchants"
+		} else {
+			continue
+		}
+
 		req := esapi.IndexRequest{
-			Index:      "products",
-			DocumentID: product.ID, // Use the same ID from PostgreSQL
+			Index:      targetIndex,
+			DocumentID: docID,
 			Body:       bytes.NewReader(docBytes),
-			Refresh:    "true", // Make it searchable immediately
+			Refresh:    "true",
 		}
 
 		res, err := req.Do(context.Background(), es)
@@ -94,10 +93,8 @@ func main() {
 		}
 		res.Body.Close()
 
-		if res.IsError() {
-			log.Printf("[ERROR] Error indexing document ID=%s: %s\n", product.ID, res.String())
-		} else {
-			fmt.Printf("[SUCCESS] Indexed to Elasticsearch! ID: %s | Name: %s\n", product.ID, product.Name)
+		if !res.IsError() {
+			fmt.Printf("[SUCCESS] Indexed to %s | ID: %s\n", targetIndex, docID)
 		}
 	}
 
