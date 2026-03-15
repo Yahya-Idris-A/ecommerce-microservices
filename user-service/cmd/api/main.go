@@ -41,13 +41,16 @@ func main() {
 
 	// 3. Setup Clean Architecture Layers
 	userRepo := postgres.NewUserRepository(db)
+	addressRepo := postgres.NewAddressRepository(db)
 	userUsecase := usecase.NewUserUsecase(userRepo, jwtSecret)
+	addressUseCase := usecase.NewAddressUsecase(addressRepo)
 
 	// 4. Setup Gin Router
 	router := gin.Default()
 
 	// Ini adalah pemanggilan fungsi yang benar
 	delivery.NewUserHandler(router, userUsecase)
+	delivery.NewAddressHandler(router, addressUseCase)
 
 	// 5. Start the Server on Port 8082
 	fmt.Println("[INFO] User Service API is running on port 8082")

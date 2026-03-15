@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,7 +30,7 @@ func NewProductUsecase(repo domain.ProductRepository, merchantRepo domain.Mercha
 }
 
 // CreateProduct menangani semua logika bisnis sebelum data disimpan.
-func (u *productUsecase) CreateProduct(req *domain.CreateProductRequest) (*domain.Product, error) {
+func (u *productUsecase) CreateProduct(ctx context.Context, req *domain.CreateProductRequest) (*domain.Product, error) {
 	// 1. Validasi Bisnis Dasar
 	if req.Price <= 0 {
 		return nil, errors.New("price must be greater than zero")
@@ -55,7 +56,7 @@ func (u *productUsecase) CreateProduct(req *domain.CreateProductRequest) (*domai
 	}
 
 	// 4. Memanggil Repository untuk menyimpan data ke database (PostgreSQL nantinya)
-	err := u.productRepo.Create(product)
+	err := u.productRepo.Create(ctx, product)
 	if err != nil {
 		return nil, err // Mengembalikan error ke layer presentasi jika database gagal
 	}
@@ -64,23 +65,23 @@ func (u *productUsecase) CreateProduct(req *domain.CreateProductRequest) (*domai
 }
 
 // GetProductByID sekadar meneruskan permintaan pencarian ke repository
-func (u *productUsecase) GetProductByID(id uuid.UUID) (*domain.Product, error) {
-	return u.productRepo.GetByID(id)
+func (u *productUsecase) GetProductByID(ctx context.Context, id uuid.UUID) (*domain.Product, error) {
+	return u.productRepo.GetByID(ctx, id)
 }
 
 // Tambahkan fungsi ini di bagian bawah file usecase kamu
-func (u *productUsecase) GetAllProducts(merchantID string, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+func (u *productUsecase) GetAllProducts(ctx context.Context, merchantID string, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
 	if merchantID != "" {
 		parsedID, err := uuid.Parse(merchantID)
 		if err != nil {
 			return nil, "", err // URL tidak valid
 		}
-		return u.productRepo.GetByMerchantID(parsedID, limit, cursorCreatedAt, cursorID)
+		return u.productRepo.GetByMerchantID(ctx, parsedID, limit, cursorCreatedAt, cursorID)
 	}
-	return u.productRepo.GetAll(keyword, limit, cursorCreatedAt, cursorID)
+	return u.productRepo.GetAll(ctx, keyword, limit, cursorCreatedAt, cursorID)
 }
 
-func (u *productUsecase) GetMyProducts(userID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+func (u *productUsecase) GetMyProducts(ctx context.Context, userID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
 	// 1. Cari dulu profil tokonya berdasarkan userID
 	merchant, err := u.merchantRepo.GetByUserID(userID)
 	if err != nil {
@@ -88,5 +89,32 @@ func (u *productUsecase) GetMyProducts(userID uuid.UUID, limit int, cursorCreate
 	}
 
 	// 2. Jika toko ketemu, ambil semua produk berdasarkan ID toko tersebut
-	return u.productRepo.GetByMerchantID(merchant.ID, limit, cursorCreatedAt, cursorID)
+	return u.productRepo.GetByMerchantID(ctx, merchant.ID, limit, cursorCreatedAt, cursorID)
+}
+
+func (u *productUsecase) DeleteProduct(ctx context.Context, userID uuid.UUID, productID uuid.UUID) error {
+	// 1. Cari dulu profil tokonya berdasarkan userID
+	merchant, err := u.merchantRepo.GetByUserID(userID)
+	if err != nil {
+		return err // Akan melempar error jika user belum buat toko
+	}
+
+	// 2. Cari produk berdasarkan productID
+	product, err := u.productRepo.GetByID(ctx, productID)
+	if err != nil {
+		return err // Produk tidak ditemukan
+	}
+
+	// 3. Pastikan produk tersebut milik toko yang sedang login (merchant.ID)
+	if product.MerchantID != merchant.ID {
+		return errors.New("you are not authorized to delete this product")
+	}
+
+	// 4. Jika validasi lolos, hapus produk tersebut
+	err = u.productRepo.Delete(ctx, productID)
+	if err != nil {
+		return err // Gagal menghapus produk
+	}
+
+	return nil // Berhasil menghapus produk
 }

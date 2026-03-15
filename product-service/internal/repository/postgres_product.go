@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -24,7 +25,7 @@ func NewPostgresProductRepository(db *sql.DB) domain.ProductRepository {
 }
 
 // Create menyimpan produk baru ke PostgreSQL
-func (r *postgresProductRepo) Create(product *domain.Product) error {
+func (r *postgresProductRepo) Create(ctx context.Context, product *domain.Product) error {
 	// Query SQL murni untuk memasukkan data.
 	// Kita menggunakan $1, $2, dst untuk mencegah SQL Injection (best practice!).
 	query := `
@@ -33,7 +34,7 @@ func (r *postgresProductRepo) Create(product *domain.Product) error {
 	`
 
 	// Mengeksekusi query dengan mengirimkan data dari entitas Product
-	_, err := r.db.Exec(query,
+	_, err := r.db.ExecContext(ctx, query,
 		product.ID,
 		product.MerchantID,
 		product.CategoryID,
@@ -55,7 +56,7 @@ func (r *postgresProductRepo) Create(product *domain.Product) error {
 }
 
 // GetByID mengambil satu produk berdasarkan UUID
-func (r *postgresProductRepo) GetByID(id uuid.UUID) (*domain.Product, error) {
+func (r *postgresProductRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Product, error) {
 	query := `
 		SELECT id, merchant_id, category_id, name, slug, description, price, stock, created_at, updated_at
 		FROM products
@@ -66,7 +67,7 @@ func (r *postgresProductRepo) GetByID(id uuid.UUID) (*domain.Product, error) {
 
 	// QueryRow digunakan karena kita hanya ekspektasi 1 baris data
 	// Scan memindahkan hasil query (kolom) ke dalam struct product
-	err := r.db.QueryRow(query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&product.ID,
 		&product.MerchantID,
 		&product.CategoryID,
@@ -91,7 +92,7 @@ func (r *postgresProductRepo) GetByID(id uuid.UUID) (*domain.Product, error) {
 }
 
 // GetAll mengambil semua produk dari database
-func (r *postgresProductRepo) GetAll(keyword string, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+func (r *postgresProductRepo) GetAll(ctx context.Context, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
 	// 1. Siapkan kerangka dasar query (WHERE 1=1 adalah trik agar kita bisa menyambung AND dengan mudah)
 	baseQuery := `
         SELECT id, merchant_id, category_id, name, slug, description, price, stock, created_at, updated_at
@@ -124,7 +125,7 @@ func (r *postgresProductRepo) GetAll(keyword string, limit int, cursorCreatedAt 
 	args = append(args, limit)
 
 	// 5. Eksekusi query dengan parameter yang sudah dirakit
-	rows, err := r.db.Query(baseQuery, args...)
+	rows, err := r.db.QueryContext(ctx, baseQuery, args...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -159,7 +160,7 @@ func (r *postgresProductRepo) GetAll(keyword string, limit int, cursorCreatedAt 
 }
 
 // GetByMerchantID mengambil semua produk milik satu toko tertentu
-func (r *postgresProductRepo) GetByMerchantID(merchantID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
+func (r *postgresProductRepo) GetByMerchantID(ctx context.Context, merchantID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]domain.Product, string, error) {
 	var rows *sql.Rows
 	var err error
 
@@ -172,7 +173,7 @@ func (r *postgresProductRepo) GetByMerchantID(merchantID uuid.UUID, limit int, c
             ORDER BY created_at DESC, id DESC
             LIMIT $4
         `
-		rows, err = r.db.Query(query, merchantID, cursorCreatedAt, cursorID, limit)
+		rows, err = r.db.QueryContext(ctx, query, merchantID, cursorCreatedAt, cursorID, limit)
 	} else {
 		// 2. Jika tidak ada cursor, ini adalah halaman pertama
 		query := `
@@ -182,7 +183,7 @@ func (r *postgresProductRepo) GetByMerchantID(merchantID uuid.UUID, limit int, c
             ORDER BY created_at DESC, id DESC
             LIMIT $2
         `
-		rows, err = r.db.Query(query, merchantID, limit)
+		rows, err = r.db.QueryContext(ctx, query, merchantID, limit)
 	}
 
 	if err != nil {
@@ -217,4 +218,26 @@ func (r *postgresProductRepo) GetByMerchantID(merchantID uuid.UUID, limit int, c
 	}
 
 	return products, nextCursor, nil
+}
+
+func (r *postgresProductRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM products WHERE id = $1`
+
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err // Error dari database (misal koneksi mati)
+	}
+
+	// Cek statistiknya: ada berapa baris yang beneran kehapus?
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// Kalau ternyata 0 baris, berarti ID-nya emang nggak ada!
+	if rowsAffected == 0 {
+		return errors.New("Product not found")
+	}
+
+	return nil
 }

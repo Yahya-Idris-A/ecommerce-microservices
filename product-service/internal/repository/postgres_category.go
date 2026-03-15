@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 
@@ -19,17 +20,17 @@ func NewPostgresCategoryRepository(db *sql.DB) domain.CategoryRepository {
 	}
 }
 
-func (r *postgresCategoryRepo) Create(category *domain.Category) error {
+func (r *postgresCategoryRepo) Create(ctx context.Context, category *domain.Category) error {
 	query := `
 		INSERT INTO categories (id, merchant_id, name, created_at)
 		VALUES ($1, $2, $3, $4)
 	`
-	_, err := r.db.Exec(query, category.ID, category.MerchantID, category.Name, category.CreatedAt)
+	_, err := r.db.ExecContext(ctx, query, category.ID, category.MerchantID, category.Name, category.CreatedAt)
 	return err
 }
 
 // GetByID mengambil satu kategori berdasarkan UUID
-func (r *postgresCategoryRepo) GetByID(id uuid.UUID) (*domain.Category, error) {
+func (r *postgresCategoryRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Category, error) {
 	query := `
 		SELECT id, merchant_id, name, created_at
 		FROM categories
@@ -40,7 +41,7 @@ func (r *postgresCategoryRepo) GetByID(id uuid.UUID) (*domain.Category, error) {
 
 	// QueryRow digunakan karena kita hanya ekspektasi 1 baris data
 	// Scan memindahkan hasil query (kolom) ke dalam struct category
-	err := r.db.QueryRow(query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&category.ID,
 		&category.MerchantID,
 		&category.Name,
@@ -59,7 +60,7 @@ func (r *postgresCategoryRepo) GetByID(id uuid.UUID) (*domain.Category, error) {
 }
 
 // GetAll mengambil semua kategori dari database
-func (r *postgresCategoryRepo) GetAll(merchantID string) ([]domain.Category, error) {
+func (r *postgresCategoryRepo) GetAll(ctx context.Context, merchantID string) ([]domain.Category, error) {
 	var query string
 	var rows *sql.Rows
 	var err error
@@ -67,11 +68,11 @@ func (r *postgresCategoryRepo) GetAll(merchantID string) ([]domain.Category, err
 	if merchantID != "" {
 		// Jika melihat toko spesifik: Ambil Kategori Global (NULL) + Kategori Toko Tersebut
 		query = `SELECT id, merchant_id, name, created_at FROM categories WHERE merchant_id = $1 ORDER BY name ASC`
-		rows, err = r.db.Query(query, merchantID)
+		rows, err = r.db.QueryContext(ctx, query, merchantID)
 	} else {
 		// Jika di halaman utama: Hanya ambil Kategori Global (NULL)
 		query = `SELECT id, merchant_id, name, created_at FROM categories WHERE merchant_id IS NULL ORDER BY name ASC`
-		rows, err = r.db.Query(query)
+		rows, err = r.db.QueryContext(ctx, query)
 	}
 
 	if err != nil {
@@ -96,4 +97,26 @@ func (r *postgresCategoryRepo) GetAll(merchantID string) ([]domain.Category, err
 	}
 
 	return categories, nil
+}
+
+func (r *postgresCategoryRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM categories WHERE id = $1`
+
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err // Error dari database (misal koneksi mati)
+	}
+
+	// Cek statistiknya: ada berapa baris yang beneran kehapus?
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// Kalau ternyata 0 baris, berarti ID-nya emang nggak ada!
+	if rowsAffected == 0 {
+		return errors.New("Category not found")
+	}
+
+	return nil
 }

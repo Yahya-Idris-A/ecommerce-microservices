@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,20 +44,22 @@ type CreateProductRequest struct {
 // Layer logika bisnis (Usecase) hanya akan memanggil fungsi di interface ini,
 // sehingga Usecase tidak perlu tahu apakah kita pakai PostgreSQL atau MySQL.
 type ProductRepository interface {
-	Create(product *Product) error
-	GetByID(id uuid.UUID) (*Product, error)
-	GetAll(keyword string, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
-	GetByMerchantID(merchantID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	Create(ctx context.Context, product *Product) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Product, error)
+	GetAll(ctx context.Context, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	GetByMerchantID(ctx context.Context, merchantID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 	// Kita akan tambahkan fungsi lain (Update, Delete) perlahan nanti
 }
 
 // ProductUsecase adalah kontrak untuk logika bisnis kita.
 // Handler/API (Delivery) akan memanggil interface ini.
 type ProductUsecase interface {
-	CreateProduct(req *CreateProductRequest) (*Product, error)
-	GetProductByID(id uuid.UUID) (*Product, error)
-	GetAllProducts(merchantID string, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
-	GetMyProducts(userID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	CreateProduct(ctx context.Context, req *CreateProductRequest) (*Product, error)
+	GetProductByID(ctx context.Context, id uuid.UUID) (*Product, error)
+	GetAllProducts(ctx context.Context, merchantID string, keyword string, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	GetMyProducts(ctx context.Context, userID uuid.UUID, limit int, cursorCreatedAt string, cursorID string) ([]Product, string, error)
+	DeleteProduct(ctx context.Context, userID uuid.UUID, productID uuid.UUID) error
 }
 
 // --- Tambahan untuk Category ---
@@ -66,13 +69,15 @@ type CreateCategoryRequest struct {
 }
 
 type CategoryRepository interface {
-	Create(category *Category) error
-	GetByID(id uuid.UUID) (*Category, error)
-	GetAll(merchantID string) ([]Category, error)
+	Create(ctx context.Context, category *Category) error
+	GetByID(ctx context.Context, id uuid.UUID) (*Category, error)
+	GetAll(ctx context.Context, merchantID string) ([]Category, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type CategoryUsecase interface {
-	CreateCategory(req *CreateCategoryRequest, merchantID *uuid.UUID) (*Category, error)
-	GetCategoryByID(id uuid.UUID) (*Category, error)
-	GetAllCategories(merchantID string) ([]Category, error)
+	CreateCategory(ctx context.Context, req *CreateCategoryRequest, merchantID *uuid.UUID) (*Category, error)
+	GetCategoryByID(ctx context.Context, id uuid.UUID) (*Category, error)
+	GetAllCategories(ctx context.Context, merchantID string) ([]Category, error)
+	DeleteCategory(ctx context.Context, role string, merchantID uuid.UUID, categoryID uuid.UUID) error
 }

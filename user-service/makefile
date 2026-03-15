@@ -5,11 +5,11 @@ include .env
 
 # Run all 'up' migrations
 migrate-up:
-	migrate -path migrations -database "$(DB_URL)" up
+	migrate -path db/migrations -database "$(DB_URL)" up
 
 # Rollback all 'down' migrations
 migrate-down:
-	migrate -path migrations -database "$(DB_URL)" down -all
+	migrate -path db/migrations -database "$(DB_URL)" down -all
 
 run:
 	go run cmd/api/main.go

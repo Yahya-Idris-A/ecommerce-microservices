@@ -1,10 +1,12 @@
 package http
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -34,6 +36,7 @@ func NewProductHandler(r *gin.Engine, us domain.ProductUsecase) {
 		api.GET("", handler.GetProducts)
 		api.GET("/me", middleware.AuthGuard("merchant"), handler.GetMyProducts)
 		api.GET("/:id", handler.GetByID)
+		api.DELETE("/:id", middleware.AuthGuard("merchant"), handler.DeleteProduct)
 	}
 }
 
@@ -51,8 +54,10 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
 	// 2. Memanggil Usecase (Koki) untuk memproses data
-	product, err := h.usecase.CreateProduct(&req)
+	product, err := h.usecase.CreateProduct(ctx, &req)
 	if err != nil {
 		log.Printf("[DEBUG DB ERROR]: %v\n", err)
 		// Mengembalikan 500 Internal Server Error jika terjadi kegagalan di layer bisnis/database
@@ -85,8 +90,11 @@ func (h *ProductHandler) GetByID(c *gin.Context) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
 	// Meminta Usecase untuk mencari data
-	product, err := h.usecase.GetProductByID(productID)
+	product, err := h.usecase.GetProductByID(ctx, productID)
 	if err != nil {
 		// Asumsi error dari Usecase saat ini adalah "data tidak ditemukan"
 		c.JSON(http.StatusNotFound, gin.H{
@@ -132,7 +140,10 @@ func (h *ProductHandler) GetProducts(c *gin.Context) {
 		}
 	}
 
-	products, nextCursor, err := h.usecase.GetAllProducts(merchantID, keyword, limit, cursorCreatedAt, cursorID)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	products, nextCursor, err := h.usecase.GetAllProducts(ctx, merchantID, keyword, limit, cursorCreatedAt, cursorID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
 		return
@@ -192,8 +203,11 @@ func (h *ProductHandler) GetMyProducts(c *gin.Context) {
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
 	// Tarik data lewat Usecase
-	products, nextCursor, err := h.usecase.GetMyProducts(userID, limit, cursorCreatedAt, cursorID)
+	products, nextCursor, err := h.usecase.GetMyProducts(ctx, userID, limit, cursorCreatedAt, cursorID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -210,5 +224,34 @@ func (h *ProductHandler) GetMyProducts(c *gin.Context) {
 			"next_cursor": nextCursor,
 			"has_more":    nextCursor != "",
 		},
+	})
+}
+
+func (h *ProductHandler) DeleteProduct(c *gin.Context) {
+	userIDStr, _ := c.Get("user_id")
+	userID, _ := uuid.Parse(userIDStr.(string))
+
+	idParam := c.Param("id")
+
+	// Validasi apakah format string adalah UUID yang valid
+	productID, err := uuid.Parse(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid product id format",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	err = h.usecase.DeleteProduct(ctx, userID, productID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Product deleted successfully",
 	})
 }
