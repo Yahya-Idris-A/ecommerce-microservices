@@ -81,6 +81,21 @@ services:
     volumes:
       - postgres_user_data:/var/lib/postgresql/data
 
+  # 7. PostgreSQL (Database for User Service)
+  postgres_order:
+    image: postgres:15-alpine
+    container_name: ecommerce_postgres_order
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: ${ORDER_DB_USER}
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD}
+      POSTGRES_DB: ${ORDER_DB_NAME}
+    command: ["postgres", "-c", "wal_level=logical"]
+    volumes:
+      - postgres_order_data:/var/lib/postgresql/data
+
 volumes:
   postgres_data:
   postgres_user_data:
+  postgres_order_data:
