@@ -29,6 +29,7 @@ func NewCategoryHandler(r *gin.Engine, us domain.CategoryUsecase, mr domain.Merc
 		api.POST("/categories", middleware.AuthGuard("admin", "merchant"), handler.CreateCategory)
 		api.GET("/categories", handler.GetAllCategories)
 		api.GET("/categories/:id", handler.GetByID)
+		api.DELETE("/categories/:id", middleware.AuthGuard("admin", "merchant"), handler.DeleteCategory)
 	}
 }
 
